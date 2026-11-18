@@ -36,7 +36,7 @@ FR-20: The system shall record every resource reservation, task-completion trans
 ## Non-Functional Requirements
 
 NFR-01: `[Team Target]` Under normal uncontested load (up to 50 concurrent active workstations), the system shall complete an uncontested manual or automatic resource-package reservation SQL transaction within ≤ 1.5 seconds, measured from server receipt of the OCSF reservation request to SQL transaction commit and response dispatch.
-NFR-02: `[Team Target]` Under the specified peak-load conditions, the system shall return an automatic resource-allocation outcome to the `Dispatcher` within 3.5 seconds of receiving the request. This end-to-end deadline shall include resource selection, SQL lock acquisition, validation, the initial allocation attempt, up to two fallback attempts, transaction commit or rollback, and response generation. A single lock wait shall not exceed 3 seconds, and each fallback attempt shall be limited to 500 milliseconds; neither limit shall extend the overall 3.5-second deadline. `[Team Assumption]` If insufficient time remains to complete another attempt safely, the system shall terminate the current request, roll back any uncommitted changes, leave the task in `Ready`, and notify the `Dispatcher` of a request timeout without reporting resource exhaustion or blocking unrelated server requests.
+NFR-02:  `[Team Target]` Under the specified peak-load conditions, the system shall return a final outcome for manual resource reservation or automatic resource allocation to the `Dispatcher` within 3.5 seconds of receiving the request. This end-to-end deadline shall include resource selection (when applicable), SQL lock acquisition, validation, the initial allocation attempt, up to two fallback attempts (for automatic allocation), transaction commit or rollback, and response generation. A single lock wait shall not exceed 3 seconds, and each automatic fallback attempt shall be limited to 500 milliseconds; neither limit shall extend the overall 3.5-second deadline. Contention handling and fallback attempts shall introduce no more than 100 milliseconds of additional delay to unrelated active requests. `[Team Assumption]` If insufficient time remains to complete another attempt safely, the system shall terminate the current request, roll back any uncommitted changes, leave the task in `Ready`, and notify the `Dispatcher` of a request timeout without reporting resource exhaustion or blocking unrelated server requests.
 NFR-03: `[Team Target]` Across a measurement series of 100 consecutive task-completion submissions under normal load, the 95th-percentile server processing latency (state transition, resource release, and dependent-task promotion) shall be ≤ 1.0 second, measured from server request receipt to SQL commit.
 NFR-04: `[Team Target]` Across a measurement series of 100 consecutive task-state or resource-status changes, the server shall broadcast OCSF Server Push updates to all relevant connected workstations with a 95th-percentile delivery latency of ≤ 1.0 second (measured from SQL commit to client receipt on LAN), 0 periodic client-side polling requests, and ≤ 64 KB average delta-push message size.
 NFR-05: `[Team Target]` The live incident status screen shall load and render an incident with up to 200 tasks within ≤ 2.0 seconds while supporting at least 50 concurrently connected workstations; the SLA reporting engine shall compute and render a monthly report across up to 10,000 historical task records within ≤ 3.0 seconds (on-demand) and ≤ 10.0 seconds (scheduled batch execution).
@@ -60,46 +60,46 @@ NFR-20: The system shall enforce a strict 4-layer separation between JavaFX GUI,
 
 | Requirement ID | Use Case | Acceptance Test ID |
 |---|---|---|
-| FR-01 | [TBD] | AT-01, AT-12, AT-14, AT-15, AT-18 |
-| FR-02 | [TBD] | AT-01, AT-02, AT-03, AT-06, AT-10 |
-| FR-03 | [TBD] | AT-09 |
-| FR-04 | [TBD] | AT-10 |
-| FR-05 | [TBD] | AT-01, AT-08 |
-| FR-06 | [TBD] | AT-01, AT-08 |
-| FR-07 | [TBD] | AT-01 |
-| FR-08 | [TBD] | AT-01, AT-02, AT-03, AT-04, AT-09 |
-| FR-09 | [TBD] | AT-01 |
-| FR-10 | [TBD] | AT-02, AT-03, AT-04, AT-09 |
-| FR-11 | [TBD] | AT-05, AT-06, AT-07 |
-| FR-12 | [TBD] | AT-06, AT-07 |
-| FR-13 | [TBD] | AT-05, AT-06, AT-07 |
-| FR-14 | [TBD] | AT-13, AT-14 |
-| FR-15 | [TBD] | AT-13 |
-| FR-16 | [TBD] | AT-01, AT-02, AT-03, AT-06, AT-13 |
-| FR-17 | [TBD] | AT-15, AT-17, AT-18 |
-| FR-18 | [TBD] | AT-15 |
-| FR-19 | [TBD] | AT-16 |
-| FR-20 | [TBD] | AT-01, AT-13, AT-15, AT-17, AT-19 |
-| NFR-01 | [TBD] | AT-01, AT-05 |
-| NFR-02 | [TBD] | AT-04, AT-06, AT-07 |
-| NFR-03 | [TBD] | AT-13 |
-| NFR-04 | [TBD] | AT-13 |
-| NFR-05 | [TBD] | AT-15, AT-17, AT-20 |
-| NFR-06 | [TBD] | AT-12, AT-14, AT-18 |
-| NFR-07 | [TBD] | AT-19 |
-| NFR-08 | [TBD] | AT-19 |
-| NFR-09 | [TBD] | AT-02, AT-03, AT-06 |
-| NFR-10 | [TBD] | AT-02, AT-03, AT-04, AT-07, AT-09 |
-| NFR-11 | [TBD] | AT-11 |
-| NFR-12 | [TBD] | AT-16, AT-17 |
-| NFR-13 | [TBD] | AT-21 |
-| NFR-14 | [TBD] | AT-01, AT-05, AT-13, AT-15 |
-| NFR-15 | [TBD] | AT-02, AT-03, AT-04, AT-07, AT-08, AT-09, AT-12, AT-14, AT-18 |
-| NFR-16 | [TBD] | AT-20 |
-| NFR-17 | [TBD] | AT-15, AT-17 |
-| NFR-18 | [TBD] | AT-22 |
-| NFR-19 | [TBD] | AT-22 |
-| NFR-20 | [TBD] | AT-23 |
+| FR-01 | UC06, UC09, UC25, UC19, UC20 | AT-01, AT-12, AT-14, AT-15, AT-18 |
+| FR-02 | UC06, UC08, UC09, UC07 | AT-01, AT-02, AT-03, AT-06, AT-10 |
+| FR-03 | UC06, UC08, UC09, UC07 | AT-09 |
+| FR-04 | UC06, UC09, UC24, UC25 | AT-10 |
+| FR-05 | UC03, UC06, UC09 | AT-01, AT-08 |
+| FR-06 | UC06, UC09 | AT-01, AT-08 |
+| FR-07 | UC06 | AT-01 |
+| FR-08 | UC06, UC09 | AT-01, AT-02, AT-03, AT-04, AT-09 |
+| FR-09 | UC06, UC09 | AT-01 |
+| FR-10 | UC06, UC08 | AT-02, AT-03, AT-04, AT-09 |
+| FR-11 | UC09 | AT-05, AT-06, AT-07 |
+| FR-12 | UC08, UC09 | AT-06, AT-07 |
+| FR-13 | UC09 | AT-05, AT-06, AT-07 |
+| FR-14 | UC25 | AT-13, AT-14 |
+| FR-15 | UC25 | AT-13 |
+| FR-16 | UC04, UC06, UC07, UC09, UC11, UC13, UC21, UC23, UC25, UC26, UC27 | AT-01, AT-02, AT-03, AT-06, AT-13 |
+| FR-17 | UC19, UC20, UC30 | AT-15, AT-17, AT-18 |
+| FR-18 | UC20, UC30 | AT-15 |
+| FR-19 | UC20, UC30 | AT-16 |
+| FR-20 | UC06, UC07, UC09, UC20, UC25, UC30 | AT-01, AT-13, AT-15, AT-17, AT-19 |
+| NFR-01 | UC06, UC09 | AT-01, AT-05 |
+| NFR-02 | UC06, UC09 | AT-04, AT-06, AT-07 |
+| NFR-03 | UC25 | AT-13 |
+| NFR-04 | UC04, UC06, UC07, UC09, UC11, UC13, UC21, UC23, UC25, UC26, UC27 | AT-13 |
+| NFR-05 | UC10, UC19, UC20, UC24, UC30 | AT-15, AT-17, AT-20 |
+| NFR-06 | UC06, UC09, UC19, UC20, UC25, UC30 | AT-12, AT-14, AT-18 |
+| NFR-07 | UC01, UC06, UC09, UC16, UC20, UC25, UC30 | AT-19 |
+| NFR-08 | UC06, UC09, UC18, UC20, UC25, UC30 | AT-19 |
+| NFR-09 | UC06, UC07, UC09 | AT-02, AT-03, AT-06 |
+| NFR-10 | UC06, UC07, UC09 | AT-02, AT-03, AT-04, AT-07, AT-09 |
+| NFR-11 | UC06, UC09, UC25 | AT-11 |
+| NFR-12 | UC20, UC30 | AT-16, AT-17 |
+| NFR-13 | UC01, UC10, UC24 | AT-21 |
+| NFR-14 | UC06, UC09, UC20, UC25 | AT-01, AT-05, AT-13, AT-15 |
+| NFR-15 | UC06, UC07, UC08, UC09, UC20, UC25 | AT-02, AT-03, AT-04, AT-07, AT-08, AT-09, AT-12, AT-14, AT-18 |
+| NFR-16 | UC10, UC19, UC20, UC24 | AT-20 |
+| NFR-17 | UC06, UC09, UC20, UC25, UC30 | AT-15, AT-17 |
+| NFR-18 | UC09 | AT-22 |
+| NFR-19 | UC20, UC29, UC30 | AT-22 |
+| NFR-20 | UC01–UC30 (system-wide) | AT-23 |
 
 ## Acceptance Tests
 
