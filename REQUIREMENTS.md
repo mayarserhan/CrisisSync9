@@ -23,32 +23,32 @@ FR-08: Using the relational SQL database as the single source of truth, the syst
 FR-09: Upon successful in-transaction verification, the system shall reserve the entire requested resource package atomically (updating all requested resources to `Reserved for Task`) and transition the task from `Ready` to `Active`.
 FR-10: If any requested resource is unavailable, faulty, or already locked, if the target task is no longer in `Ready` state upon lock acquisition, or if lock-wait times out during manual reservation, the system shall roll back the failed transaction completely—committing no task or resource changes and without undoing changes committed by concurrent transactions—notify the `Dispatcher` with the conflicting resource identifier or failure reason, and update the `Dispatcher`'s screen to reflect current database state.
 FR-11: The system shall allow an authorized `Dispatcher` to request automatic resource allocation for a `Ready` task according to a selectable allocation criterion (such as closest geographic proximity to the incident location).
-FR-12: When concurrent automatic allocations compete for the same resource, the system shall grant the resource to only one allocation and automatically attempt up to two next-best available resource alternatives for the competing allocation without requiring `Dispatcher` resubmission and without blocking unrelated server requests. `[Team Assumption]` The automatic allocator caps contention retries at two fallback attempts (three total attempts: initial candidate plus up to two next-best alternatives) to bound server latency and prevent request starvation; if a fourth or further matching `Available` candidate exists in the pool after all three attempts fail under contention, the request aborts cleanly and instructs the `Dispatcher` to retry or reserve manually.
-FR-13: Upon successful automatic allocation (initial selection or up to two fallback attempts), the system shall lock and reserve the selected package atomically (`Ready` to `Active`); if no valid alternative succeeds within the retry limit or none exists in the pool, the system shall abort with zero partial reservations (without undoing concurrent committed transactions) and notify the `Dispatcher`.
+FR-12: When concurrent automatic allocations compete for the same resource, the system shall grant the resource to only one allocation and automatically attempt up to two next-best available resource alternatives for the competing allocation without requiring `Dispatcher` resubmission and without blocking unrelated server requests. `[Team Assumption]` The automatic allocator caps contention retries at two fallback attempts (three total attempts: initial candidate plus up to two next-best alternatives) to bound server latency and prevent request starvation. If all three attempts are exhausted while additional eligible resources remain available, the system shall leave the task in `Ready` state with no partial reservations and notify the `Dispatcher` that the automatic retry limit was reached. The `Dispatcher` may initiate a new automatic allocation request or reserve resources manually. Resource exhaustion shall be reported only when no eligible available alternative exists.
+FR-13: Upon successful automatic allocation (initial selection or up to two fallback attempts), the system shall lock and reserve the selected resource package atomically, transitioning the task from `Ready` to `Active`. If no allocation attempt succeeds within the retry limit, the system shall terminate the current automatic allocation request without committing any partial reservations, preserve changes committed by concurrent transactions, and leave the task in `Ready`. If additional eligible resource packages remain available, the system shall notify the `Dispatcher` that the automatic retry limit was reached and allow a new automatic allocation request or manual reservation. If no eligible available resource package remains in the repository, the system shall report resource exhaustion and notify the `Dispatcher`.
 FR-14: The system shall allow only the `Field Commander` appointed to an `Active` task to report its completion from the incident status screen, rejecting any task-completion submission from an unappointed `Field Commander`, another user role, or for any task not in the `Active` state.
 FR-15: Upon valid completion reporting of an `Active` task, the system shall transition the task to the immutable `Completed` state, immediately release the task reservation so resources still in `Reserved for Task` return to `Available` while any equipment already transitioned to `Faulty/In Maintenance` mid-task retains its `Faulty/In Maintenance` status, and automatically promote any dependent `Blocked` task to `Ready` once all of its predecessor tasks are `Completed`.
 FR-16: The system shall push every task-state transition and resource-status change from the server immediately to all relevant connected client workstations via OCSF Server Push without client-side polling.
 FR-17: The system shall automatically generate and persist the monthly SLA report for the preceding calendar month after month-end according to the synchronized server clock (`[Team Assumption]` triggered at `00:00:00 UTC` on the first day of the following month so final-millisecond events of the closing month are captured), and shall allow only the `System Administrator` to generate on-demand SLA reports for a selected past month and view generated reports.
-FR-18: The system shall calculate the monthly SLA report per incident type (`Building Collapse`, `Fire`, `Traffic Accident`, `HazMat Leak`, and `Natural Disaster`) as the average elapsed time from incident opening to task closure across qualifying incidents. `[Team Assumption]` Task closure is defined as the latest final-state (`Completed` or `Cancelled`) transition timestamp among all tasks in the incident; an incident is attributed to the target calendar month (UTC) in which its last task reached a final state (excluding still-open incidents); and `Cancelled` incidents (e.g., false alarms) as well as incidents with zero `Completed` tasks are excluded so they do not skew SLA metrics.
+FR-18: The system shall calculate the monthly SLA report per incident type (`Building Collapse`, `Fire`, `Traffic Accident`, `HazMat Leak`, and `Natural Disaster`) as the average elapsed time from incident opening to task closure across qualifying incidents. `[Team Assumption]` Task closure is defined as the latest final-state (`Completed` or `Cancelled`) transition timestamp among all tasks in the incident; an incident is attributed to the target calendar month (UTC) in which its last task reached a final state (including incidents still `Open` due to pending financial settlement, provided all their tasks have reached a final state); and `Cancelled` incidents (e.g., false alarms) as well as incidents with zero `Completed` tasks are excluded so they do not skew SLA metrics.
 FR-19: When a reporting period or incident type has zero qualifying completed incidents, the system shall output `N/A` (never `0`) without failing report generation.
 FR-20: The system shall record every resource reservation, task-completion transition, and SLA report generation event in an immutable (append-only) audit log together with the exact server UTC timestamp and acting user identifier (`SYSTEM` for automated scheduled monthly SLA generation; authenticated user identifier for all user-initiated actions).
 
 ## Non-Functional Requirements
 
 NFR-01: `[Team Target]` Under normal uncontested load (up to 50 concurrent active workstations), the system shall complete an uncontested manual or automatic resource-package reservation SQL transaction within ≤ 1.5 seconds, measured from server receipt of the OCSF reservation request to SQL transaction commit and response dispatch.
-NFR-02: `[Team Target]` Under resource contention, database pessimistic row locking shall enforce a lock-wait timeout of ≤ 3.0 seconds; any conflicted, fallback-retried, or timed-out reservation request shall complete rollback/retry and dispatch its final server response within ≤ 3.5 seconds from server receipt, with each automatic fallback attempt adding ≤ 500 milliseconds and introducing ≤ 100 milliseconds of delay to unrelated active requests.
+NFR-02:  `[Team Target]` Under the specified peak-load conditions, the system shall return a final outcome for manual resource reservation or automatic resource allocation to the `Dispatcher` within 3.5 seconds of receiving the request. This end-to-end deadline shall include resource selection (when applicable), SQL lock acquisition, validation, the initial allocation attempt, up to two fallback attempts (for automatic allocation), transaction commit or rollback, and response generation. A single lock wait shall not exceed 3 seconds, and each automatic fallback attempt shall be limited to 500 milliseconds; neither limit shall extend the overall 3.5-second deadline. Contention handling and fallback attempts shall introduce no more than 100 milliseconds of additional delay to unrelated active requests. `[Team Assumption]` If insufficient time remains to complete another attempt safely, the system shall terminate the current request, roll back any uncommitted changes, leave the task in `Ready`, and notify the `Dispatcher` of a request timeout without reporting resource exhaustion or blocking unrelated server requests.
 NFR-03: `[Team Target]` Across a measurement series of 100 consecutive task-completion submissions under normal load, the 95th-percentile server processing latency (state transition, resource release, and dependent-task promotion) shall be ≤ 1.0 second, measured from server request receipt to SQL commit.
 NFR-04: `[Team Target]` Across a measurement series of 100 consecutive task-state or resource-status changes, the server shall broadcast OCSF Server Push updates to all relevant connected workstations with a 95th-percentile delivery latency of ≤ 1.0 second (measured from SQL commit to client receipt on LAN), 0 periodic client-side polling requests, and ≤ 64 KB average delta-push message size.
 NFR-05: `[Team Target]` The live incident status screen shall load and render an incident with up to 200 tasks within ≤ 2.0 seconds while supporting at least 50 concurrently connected workstations; the SLA reporting engine shall compute and render a monthly report across up to 10,000 historical task records within ≤ 3.0 seconds (on-demand) and ≤ 10.0 seconds (scheduled batch execution).
 NFR-06: `[Team Target]` The server shall enforce role-based access control (RBAC) server-side on 100% of incoming OCSF reservation, task-completion, and SLA-reporting requests and reject unauthorized operations within ≤ 100 milliseconds from request receipt.
 NFR-07: `[Team Target]` All client-server communications over LAN TCP/IP (OCSF) shall be encrypted using TLS 1.2 or TLS 1.3 with AES-256 cipher suites; user passwords shall be stored as salted BCrypt hashes; and database credentials shall be stored encrypted using AES-256, with 0 plaintext credentials, internal stack traces, or SQL schemas exposed in application logs or client error dialogs.
-NFR-08: `[Team Target]` All SQL/ORM queries used for reservations, task completion, audit logging, and SLA aggregation shall use 100% parameterized queries or prepared statements to prevent SQL Injection (0 vulnerabilities), and the audit log table shall enforce database privileges blocking 100% of `UPDATE` and `DELETE` operations by the application database account.
-NFR-09: `[Team Target]` Under stress tests of 50 parallel reservation threads targeting the same resource or task, database-level pessimistic row locking (`SELECT ... FOR UPDATE` or ORM pessimistic locking) shall guarantee a 0% double-booking rate (0 race conditions).
+NFR-08: `[Team Target]` All SQL/ORM queries used for reservations, task completion, audit logging, and SLA aggregation that accept variable input values shall use 100% parameterized queries or prepared statements. Security tests shall detect 0 successful SQL Injection attempts against these operations. The audit log table shall enforce database privileges blocking 100% of `UPDATE` and `DELETE` operations by the application database account.
+NFR-09: `[Team Target]` Under stress tests of 50 parallel reservation threads targeting the same resource or task, database-level pessimistic row locking (`SELECT ... FOR UPDATE` or ORM pessimistic locking), combined with in-transaction status revalidation, shall ensure a 0% double-booking rate, at most one successful reservation of the same resource or activation of the same task, and 0 partial reservations committed by unsuccessful transactions.
 NFR-10: `[Team Target]` Every failed or timed-out resource-package reservation shall execute a 100% atomic SQL rollback, committing zero task or resource changes and leaving changes committed by concurrent transactions intact.
 NFR-11: `[Team Target]` The server shall enforce request idempotency (via client-generated request ID) on resource-reservation and task-completion requests so duplicate submissions arriving within ≤ 2.0 seconds produce 0 duplicate reservations or spurious state-transition errors.
 NFR-12: `[Team Target]` If the server is offline across a scheduled `00:00:00 UTC` end-of-month SLA report trigger, the scheduler shall detect and execute any missed monthly report within ≤ 5.0 minutes of server restart (0 skipped monthly periods); for periods or incident types with 0 qualifying completed incidents, the SLA engine shall output `N/A` with 0 unhandled exceptions (such as `NullPointerException` or division-by-zero).
 NFR-13: `[Team Target]` Upon a transient LAN disconnection, the JavaFX client shall automatically attempt reconnection within ≤ 5.0 seconds (up to 5 consecutive attempts) and receive a synchronized snapshot of open incidents, tasks, and reserved resources; upon graceful shutdown, the server shall complete in-flight SQL transactions within ≤ 10.0 seconds before closing client sockets (0 partially committed transactions), and recover on cold startup within ≤ 30.0 seconds.
-NFR-14: `[Team Target]` A trained `Dispatcher` shall initiate and confirm a manual or automatic resource reservation in ≤ 3 clicks, a `Field Commander` shall report task completion in ≤ 2 clicks, and a `System Administrator` shall generate an on-demand SLA report in ≤ 3 clicks.
+NFR-14: `[Team Target]` A trained `Dispatcher` shall initiate and confirm a manual or automatic resource reservation in ≤ 3 clicks, a `Field Commander` shall report task completion in ≤ 2 clicks, and a `System Administrator` shall generate an on-demand SLA report in ≤ 3 clicks. `[Team Assumption]` Click counts are measured from the relevant action-ready screen, after the target task, required resources, or reporting parameters have been selected. Navigation, data entry, and individual resource-selection clicks are excluded; only clicks required to initiate and confirm the action are counted.
 NFR-15: `[Team Target]` Upon any failed concurrent reservation, lock timeout, blocked predecessor check, invalid package validation, unavailable/faulty resource check, or unauthorized request, the client shall display an explicit human-readable error message naming the conflicting resource ID or failure reason within ≤ 1.0 second of receiving the server response.
 NFR-16: `[Team Target]` The live incident status screen and SLA reporting interface shall distinguish all five task states (`Blocked`, `Ready`, `Active`, `Completed`, `Cancelled`) and overdue tasks using both distinct colors and explicit text/icon badges compliant with WCAG 2.1 Level AA (contrast ratio ≥ 4.5:1), rendering cleanly across resolutions from 1280×720 to 3840×2160 with 0 clipped action buttons or overlapping labels.
 NFR-17: `[Team Target]` All timestamps used for SLA calculation, end-of-month report scheduling, and audit logging shall rely strictly on a single NTP-synchronized server clock (drift ≤ 1.0 second) with 0 reliance on client workstation clocks, persisted in UTC and formatted on the UI with an explicit timezone/UTC offset (`YYYY-MM-DD HH:MM:SS UTC±HH:MM`).
@@ -60,46 +60,46 @@ NFR-20: The system shall enforce a strict 4-layer separation between JavaFX GUI,
 
 | Requirement ID | Use Case | Acceptance Test ID |
 |---|---|---|
-| FR-01 | [TBD] | AT-01, AT-12, AT-14, AT-15, AT-18 |
-| FR-02 | [TBD] | AT-01, AT-02, AT-03, AT-06, AT-10 |
-| FR-03 | [TBD] | AT-09 |
-| FR-04 | [TBD] | AT-10 |
-| FR-05 | [TBD] | AT-01, AT-08 |
-| FR-06 | [TBD] | AT-01, AT-08 |
-| FR-07 | [TBD] | AT-01 |
-| FR-08 | [TBD] | AT-01, AT-02, AT-03, AT-04, AT-09 |
-| FR-09 | [TBD] | AT-01 |
-| FR-10 | [TBD] | AT-02, AT-03, AT-04, AT-09 |
-| FR-11 | [TBD] | AT-05, AT-06, AT-07 |
-| FR-12 | [TBD] | AT-06, AT-07 |
-| FR-13 | [TBD] | AT-05, AT-06, AT-07 |
-| FR-14 | [TBD] | AT-13, AT-14 |
-| FR-15 | [TBD] | AT-13 |
-| FR-16 | [TBD] | AT-01, AT-02, AT-03, AT-06, AT-13 |
-| FR-17 | [TBD] | AT-15, AT-17, AT-18 |
-| FR-18 | [TBD] | AT-15 |
-| FR-19 | [TBD] | AT-16 |
-| FR-20 | [TBD] | AT-01, AT-13, AT-15, AT-17, AT-19 |
-| NFR-01 | [TBD] | AT-01, AT-05 |
-| NFR-02 | [TBD] | AT-04, AT-06, AT-07 |
-| NFR-03 | [TBD] | AT-13 |
-| NFR-04 | [TBD] | AT-13 |
-| NFR-05 | [TBD] | AT-15, AT-17, AT-20 |
-| NFR-06 | [TBD] | AT-12, AT-14, AT-18 |
-| NFR-07 | [TBD] | AT-19 |
-| NFR-08 | [TBD] | AT-19 |
-| NFR-09 | [TBD] | AT-02, AT-03, AT-06 |
-| NFR-10 | [TBD] | AT-02, AT-03, AT-04, AT-07, AT-09 |
-| NFR-11 | [TBD] | AT-11 |
-| NFR-12 | [TBD] | AT-16, AT-17 |
-| NFR-13 | [TBD] | AT-21 |
-| NFR-14 | [TBD] | AT-01, AT-05, AT-13, AT-15 |
-| NFR-15 | [TBD] | AT-02, AT-03, AT-04, AT-07, AT-08, AT-09, AT-12, AT-14, AT-18 |
-| NFR-16 | [TBD] | AT-20 |
-| NFR-17 | [TBD] | AT-15, AT-17 |
-| NFR-18 | [TBD] | AT-22 |
-| NFR-19 | [TBD] | AT-22 |
-| NFR-20 | [TBD] | AT-23 |
+| FR-01 | UC06, UC09, UC25, UC19, UC20 | AT-01, AT-12, AT-14, AT-15, AT-18 |
+| FR-02 | UC06, UC08, UC09, UC07 | AT-01, AT-02, AT-03, AT-06, AT-10 |
+| FR-03 | UC06, UC08, UC09, UC07 | AT-09 |
+| FR-04 | UC06, UC09, UC24, UC25 | AT-10 |
+| FR-05 | UC03, UC06, UC09 | AT-01, AT-08 |
+| FR-06 | UC06, UC09 | AT-01, AT-08 |
+| FR-07 | UC06 | AT-01 |
+| FR-08 | UC06, UC09 | AT-01, AT-02, AT-03, AT-04, AT-09 |
+| FR-09 | UC06, UC09 | AT-01 |
+| FR-10 | UC06, UC08 | AT-02, AT-03, AT-04, AT-09 |
+| FR-11 | UC09 | AT-05, AT-06, AT-07 |
+| FR-12 | UC08, UC09 | AT-06, AT-07 |
+| FR-13 | UC09 | AT-05, AT-06, AT-07 |
+| FR-14 | UC25 | AT-13, AT-14 |
+| FR-15 | UC25 | AT-13 |
+| FR-16 | UC04, UC06, UC07, UC09, UC11, UC13, UC21, UC23, UC25, UC26, UC27 | AT-01, AT-02, AT-03, AT-06, AT-13 |
+| FR-17 | UC19, UC20, UC30 | AT-15, AT-17, AT-18 |
+| FR-18 | UC20, UC30 | AT-15 |
+| FR-19 | UC20, UC30 | AT-16 |
+| FR-20 | UC06, UC07, UC09, UC20, UC25, UC30 | AT-01, AT-13, AT-15, AT-17, AT-19 |
+| NFR-01 | UC06, UC09 | AT-01, AT-05 |
+| NFR-02 | UC06, UC09 | AT-04, AT-06, AT-07 |
+| NFR-03 | UC25 | AT-13 |
+| NFR-04 | UC04, UC06, UC07, UC09, UC11, UC13, UC21, UC23, UC25, UC26, UC27 | AT-13 |
+| NFR-05 | UC10, UC19, UC20, UC24, UC30 | AT-15, AT-17, AT-20 |
+| NFR-06 | UC06, UC09, UC19, UC20, UC25, UC30 | AT-12, AT-14, AT-18 |
+| NFR-07 | UC01, UC06, UC09, UC16, UC20, UC25, UC30 | AT-19 |
+| NFR-08 | UC06, UC09, UC18, UC20, UC25, UC30 | AT-19 |
+| NFR-09 | UC06, UC07, UC09 | AT-02, AT-03, AT-06 |
+| NFR-10 | UC06, UC07, UC09 | AT-02, AT-03, AT-04, AT-07, AT-09 |
+| NFR-11 | UC06, UC09, UC25 | AT-11 |
+| NFR-12 | UC20, UC30 | AT-16, AT-17 |
+| NFR-13 | UC01, UC10, UC24 | AT-21 |
+| NFR-14 | UC06, UC09, UC20, UC25 | AT-01, AT-05, AT-13, AT-15 |
+| NFR-15 | UC06, UC07, UC08, UC09, UC20, UC25 | AT-02, AT-03, AT-04, AT-07, AT-08, AT-09, AT-12, AT-14, AT-18 |
+| NFR-16 | UC10, UC19, UC20, UC24 | AT-20 |
+| NFR-17 | UC06, UC09, UC20, UC25, UC30 | AT-15, AT-17 |
+| NFR-18 | UC09 | AT-22 |
+| NFR-19 | UC20, UC29, UC30 | AT-22 |
+| NFR-20 | UC01–UC30 (system-wide) | AT-23 |
 
 ## Acceptance Tests
 
@@ -134,19 +134,19 @@ NFR-20: The system shall enforce a strict 4-layer separation between JavaFX GUI,
 - **Then** the initial selection (`EQ-AMB-01`) and 1st fallback (`EQ-AMB-02`) detect contention, the server automatically advances to the 2nd fallback (`EQ-AMB-03`) without `Dispatcher` resubmission (adding ≤ 500 milliseconds per fallback retry and ≤ 100 milliseconds delay to unrelated requests), locks and reserves the complete package with `EQ-AMB-03` atomically (`Ready` to `Active`) within ≤ 3.5 seconds from server request receipt, and pushes updates via OCSF Server Push.
 
 ### AT-07: Automatic Resource Allocation — Exhausted Resource Pool Failure
-- **Given** a `Ready` task requires 1 `Bulldozer`, the initial candidate and up to two fallback `Bulldozer` candidates are `Reserved for Task` or `Faulty/In Maintenance`, and no other matching `Available` `Bulldozer` exists in the resource pool
-- **When** the server completes the initial attempt and fallback checks
-- **Then** the system aborts allocation within ≤ 3.5 seconds from server request receipt with an atomic rollback (0 partial reservations, leaving concurrent committed transactions intact), keeps the task in `Ready`, and displays an explicit human-readable error within ≤ 1.0 second of server response stating no available `Bulldozer` remains in the pool.
+- **Given** a `Ready` task requires 1 `Bulldozer`, three eligible `Bulldozer` candidates are initially `Available` (one initial candidate and two fallback alternatives), and competing transactions successfully reserve each candidate before the allocator can acquire its locks, leaving no other matching `Available` `Bulldozer` in the resource pool
+- **When** the server performs the initial allocation attempt and up to two automatic fallback attempts
+- **Then** the system reports resource exhaustion within ≤ 3.5 seconds from server request receipt, without committing any partial reservations (leaving concurrent committed transactions intact), keeps the task in `Ready`, and displays an explicit human-readable error within ≤ 1.0 second of receiving the server response stating that no available `Bulldozer` remains in the pool.
 
 ### AT-08: Resource Reservation Validation — Structural Pre-Checks
 - **Scenario Outline:** Reject invalid task state or invalid `Field Commander` package count
-    - **Given** a `Dispatcher` opens a task with `<Precondition>`
-    - **When** the `Dispatcher` submits a reservation request
-    - **Then** the system rejects the request before acquiring resource locks, commits zero changes, and displays an explicit validation error naming `<ExpectedMessage>` within ≤ 1.0 second.
+  - **Given** a `Dispatcher` opens a task with `<Precondition>`
+  - **When** the `Dispatcher` submits a reservation request
+  - **Then** the system rejects the request before acquiring resource locks, commits zero changes, and displays an explicit validation error naming `<ExpectedMessage>` within ≤ 1.0 second.
 
 | Case | Precondition | ExpectedMessage |
 |---|---|---|
-| Blocked task | Task is in `Blocked` state because predecessor `Task-A` is still `Active` | `Task-A` (`Blocked` state) |
+| Blocked task | Task is in `Blocked` state because predecessor `Task-A` is still `Active` | Task is `Blocked` because predecessor `Task-A` is still `Active` |
 | Zero commanders | `Ready` task package contains 0 `Field Commanders` | Missing required `Field Commander` (must be exactly 1) |
 | Multiple commanders | `Ready` task package contains 2 `Field Commanders` | Multiple `Field Commanders` (must be exactly 1) |
 
@@ -181,9 +181,9 @@ NFR-20: The system shall enforce a strict 4-layer separation between JavaFX GUI,
 - **Then** server-side RBAC rejects `FC-02` within ≤ 100 milliseconds with an explicit authorization error displayed within ≤ 1.0 second, `Task-A` remains `Active` with unchanged resources, and `Task-C` remains immutably `Completed`.
 
 ### AT-15: SLA Report Generation — On-Demand Monthly Happy Path & Month Attribution
-- **Given** 10,000 historical task records exist across incident types, including incidents whose last task reached a final state (`Completed` or `Cancelled`) in October 2026 (UTC), `Cancelled` false-alarm incidents, incidents with zero `Completed` tasks, and incidents still open at month-end
+- **Given** 10,000 historical task records exist across incident types, including exactly two qualifying `Fire` incidents for October 2026 (UTC), one with an elapsed duration of 60 minutes and another with an elapsed duration of 120 minutes from incident opening to its last task reaching a final state (`Completed` or `Cancelled`); all tasks in both incidents have reached a final state, but one incident remains `Open` due to pending financial settlement. The dataset also includes `Cancelled` false-alarm incidents, incidents with zero `Completed` tasks, and incidents with unfinished tasks at month-end
 - **When** an authenticated `System Administrator` selects October 2026 and requests an on-demand SLA report in ≤ 3 clicks
-- **Then** the server computes per-type average elapsed time (from incident opening timestamp to the latest final-state task transition timestamp) including only qualifying October 2026 incidents (excluding `Cancelled`, zero-completed-task, and open incidents), records an audit entry with the `System Administrator`'s ID, and renders the report within ≤ 3.0 seconds using NTP-synchronized server timestamps formatted with explicit UTC offset (`YYYY-MM-DD HH:MM:SS UTC±HH:MM`).
+- **Then** the server computes per-type average elapsed time from incident opening to the latest final-state task transition timestamp, includes qualifying October 2026 incidents even if financial settlement is pending, excludes `Cancelled` incidents, incidents with zero `Completed` tasks, and incidents with unfinished tasks at month-end, and reports an average SLA duration of 90 minutes for the `Fire` category. The system records an audit entry with the `System Administrator`'s ID and renders the report within ≤ 3.0 seconds using NTP-synchronized server timestamps formatted with explicit UTC offset (`YYYY-MM-DD HH:MM:SS UTC±HH:MM`).
 
 ### AT-16: SLA Report Generation — Empty Dataset Handling
 - **Given** the `System Administrator` requests an SLA report for a past month in which zero qualifying completed incidents exist for one or more incident types
@@ -222,5 +222,5 @@ NFR-20: The system shall enforce a strict 4-layer separation between JavaFX GUI,
 
 ### AT-23: Architectural Verification — 4-Layer Separation
 - **Given** the CrisisSync multi-layer codebase (JavaFX GUI, OCSF Communication, Server Business Logic, SQL/ORM Persistence)
-- **When** an automated static dependency check (or package import audit) scans all JavaFX GUI controller and view classes
-- **Then** 0 direct SQL (`java.sql.*`, `javax.sql.*`) or ORM imports are present in the GUI layer.
+- **When** an automated static dependency check (or package import audit) scans all production classes across the four architectural layers
+- **Then** 0 prohibited cross-layer dependencies shall be detected: JavaFX GUI classes shall not directly access Server Business Logic or SQL/ORM Persistence; OCSF Communication classes shall not directly access SQL/ORM Persistence; Server Business Logic classes shall not depend on JavaFX GUI; and SQL/ORM Persistence classes shall not depend on JavaFX GUI or OCSF Communication. No circular dependencies between architectural layers shall be detected.
